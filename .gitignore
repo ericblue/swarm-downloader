@@ -1,0 +1,21 @@
+# Secrets
+.env
+
+# Downloaded data
+data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
