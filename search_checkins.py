@@ -37,6 +37,7 @@ def load_checkins(path=DATA_FILE):
         categories = venue.get("categories", [])
         category = categories[0].get("name", "") if categories else ""
         category_short = categories[0].get("shortName", "") if categories else ""
+        category_code = categories[0].get("categoryCode", 0) if categories else 0
 
         ts = c.get("createdAt")
         tz_offset = c.get("timeZoneOffset", 0)
@@ -52,6 +53,7 @@ def load_checkins(path=DATA_FILE):
             "venue": venue.get("name", ""),
             "category": category,
             "category_short": category_short,
+            "category_code": category_code,
             "address": location.get("address", ""),
             "city": location.get("city", ""),
             "state": location.get("state", ""),
@@ -314,6 +316,175 @@ def cmd_categories(checkins, args):
     print_bar_chart(cat_counts, top_n=30, max_bars=30)
 
 
+def _normalize(s):
+    """Normalize a string for matching: lowercase, spaces/hyphens/& stripped."""
+    return s.lower().replace("-", "").replace(" ", "").replace("&", "")
+
+
+def is_restaurant(c):
+    """Check if a checkin is at a restaurant/food/drink venue.
+
+    Uses Foursquare's category code hierarchy: 13000-13999 = "Dining and Drinking".
+    This covers restaurants, bars, cafés, bakeries, breweries, etc.
+    """
+    return 13000 <= c.get("category_code", 0) <= 13999
+
+
+# Dining sub-type classification based on Foursquare category codes
+_COFFEE_CAFE = {13034, 13035, 13036}  # Café, Coffee Shop, Tea Room
+_FAST_FOOD = {13145}  # Fast Food Restaurant
+_BARS = {13003, 13006, 13009, 13013, 13016, 13017, 13018, 13021, 13022,
+         13023, 13024, 13025, 13389}  # Bar, Beer Bar, ..., Irish Pub
+_BAKERY_DESSERT = {13001, 13002, 13040, 13043, 13044, 13046}  # Bagel, Bakery, Dessert, Donut, FroYo, Ice Cream
+_BREWERY_WINERY = {13029, 13050, 13387}  # Brewery, Distillery, Winery
+
+
+def dining_type(c):
+    """Classify a dining checkin into a sub-type."""
+    code = c.get("category_code", 0)
+    if code in _COFFEE_CAFE:
+        return "Coffee & Cafe"
+    if code in _FAST_FOOD:
+        return "Fast Food"
+    if code in _BARS:
+        return "Bars & Lounges"
+    if code in _BAKERY_DESSERT:
+        return "Bakery & Desserts"
+    if code in _BREWERY_WINERY:
+        return "Brewery & Winery"
+    if 13000 <= code <= 13999:
+        return "Restaurants"
+    return "Other"
+
+
+def cmd_restaurants(checkins, args):
+    results = filter_checkins(
+        checkins, year=args.year, month=args.month, city=args.city, state=args.state,
+    )
+    results = [c for c in results if is_restaurant(c)]
+
+    # Filter by dining type if specified
+    dtype = getattr(args, "type", None)
+    if dtype:
+        dtype_norm = _normalize(dtype)
+        results = [c for c in results if dtype_norm in _normalize(dining_type(c))]
+
+    title = "Dining"
+    if dtype:
+        title = dtype.title()
+    if args.year:
+        title += f" ({args.year})"
+    print_header(title)
+    print_count(len(results), "checkins")
+
+    # Dining type breakdown
+    print(f"  {BOLD}By Type{RESET}")
+    type_counts = Counter(dining_type(c) for c in results)
+    type_order = ["Restaurants", "Fast Food", "Coffee & Cafe",
+                  "Bars & Lounges", "Bakery & Desserts", "Brewery & Winery"]
+    ordered = {t: type_counts.get(t, 0) for t in type_order if type_counts.get(t, 0) > 0}
+    print_bar_chart(Counter(ordered), max_bars=30)
+
+    # Category breakdown
+    print(f"  {BOLD}By Cuisine / Category{RESET}")
+    cat_counts = Counter(c["category"] for c in results)
+    print_bar_chart(cat_counts, top_n=30, max_bars=30)
+
+    # Top restaurant venues
+    print(f"  {BOLD}Top Venues{RESET}")
+    venue_counts = Counter(c["venue"] for c in results)
+    top_n = args.limit or 20
+    items = venue_counts.most_common(top_n)
+    if items:
+        max_count = items[0][1]
+        max_label = max(len(v) for v, _ in items)
+        for rank, (venue, count) in enumerate(items, 1):
+            venue_checkins = [c for c in results if c["venue"] == venue]
+            latest = max(venue_checkins, key=lambda c: c["dt"] or datetime.min.replace(tzinfo=timezone.utc))
+            cat = latest["category_short"] or latest["category"]
+            city = latest["city"]
+            bar_len = int((count / max_count) * 20)
+            bar = "█" * bar_len
+            print(
+                f"  {BOLD}{rank:>3}.{RESET} {WHITE}{venue:{max_label}}{RESET}  "
+                f"{GREEN}{bar}{RESET} {BOLD}{count:>3}{RESET}  "
+                f"{DIM}{cat}{RESET}  {DIM}{city}{RESET}"
+            )
+        print()
+
+    # By year (if not filtering by year)
+    if not args.year and results:
+        print(f"  {BOLD}Visits by Year{RESET}")
+        year_counter = Counter(c["dt"].year for c in results if c["dt"])
+        for yr in sorted(year_counter):
+            count = year_counter[yr]
+            bar_len = int((count / max(year_counter.values())) * 25)
+            bar = "█" * bar_len
+            print(f"  {BOLD}{yr}{RESET}  {GREEN}{bar}{RESET} {count}")
+        print()
+
+
+def cmd_recent(checkins, args):
+    results = filter_checkins(
+        checkins, year=args.year, month=args.month, city=args.city, state=args.state,
+    )
+    results = [c for c in results if is_restaurant(c)]
+
+    # Filter by dining type if specified
+    dtype = getattr(args, "type", None)
+    if dtype:
+        dtype_norm = _normalize(dtype)
+        results = [c for c in results if dtype_norm in _normalize(dining_type(c))]
+
+    results.sort(key=lambda c: c["dt"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+
+    # Date range filter
+    if args.after:
+        try:
+            after_dt = datetime.strptime(args.after, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            results = [c for c in results if c["dt"] and c["dt"] >= after_dt]
+        except ValueError:
+            print(f"  {RED}Invalid --after date. Use YYYY-MM-DD format.{RESET}")
+            return
+    if args.before:
+        try:
+            before_dt = datetime.strptime(args.before, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            results = [c for c in results if c["dt"] and c["dt"] <= before_dt]
+        except ValueError:
+            print(f"  {RED}Invalid --before date. Use YYYY-MM-DD format.{RESET}")
+            return
+
+    limit = args.limit or 20
+    total = len(results)
+    shown = results[:limit]
+
+    title = "Recent Restaurants"
+    filters = []
+    if args.year:
+        filters.append(str(args.year))
+    if args.month:
+        months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        filters.append(months[args.month])
+    if args.after:
+        filters.append(f"after {args.after}")
+    if args.before:
+        filters.append(f"before {args.before}")
+    if args.city:
+        filters.append(args.city)
+    if filters:
+        title += f" ({', '.join(filters)})"
+    print_header(title)
+    print_count(total, "restaurant checkins")
+
+    for i, c in enumerate(shown, 1):
+        print(fmt_checkin(c, index=i))
+    print()
+
+    if total > limit:
+        print(f"  {DIM}Showing {limit} of {total} results. Use --limit to see more.{RESET}\n")
+
+
 def cmd_interactive(checkins):
     """Interactive REPL mode."""
     print_header("Swarm Checkin Explorer")
@@ -351,6 +522,10 @@ def cmd_interactive(checkins):
     {CYAN}venues{RESET}            Top venues ranking
     {CYAN}timeline{RESET}          Monthly timeline chart
     {CYAN}categories{RESET}        Category breakdown
+    {CYAN}restaurants{RESET}       Restaurant category breakdown
+    {CYAN}restaurants YYYY{RESET}  Restaurant categories for a year
+    {CYAN}recent{RESET}            Last 20 restaurants visited
+    {CYAN}recent YYYY{RESET}       Last restaurants for a year
     {CYAN}help{RESET}              This help
     {CYAN}quit{RESET}              Exit
 """)
@@ -397,6 +572,36 @@ def cmd_interactive(checkins):
                 year=year, month=None, city=None, state=None,
             )
             cmd_categories(checkins, ns)
+            continue
+
+        # Restaurants / dining command
+        if cmd in ("restaurants", "rest", "dining"):
+            year = int(tokens[1]) if len(tokens) > 1 and tokens[1].isdigit() else None
+            # Check for type keyword
+            dtype = None
+            for j, t in enumerate(tokens[1:], 1):
+                if t.lower() in ("restaurants", "fastfood", "fast-food", "coffee",
+                                  "bars", "bakery", "desserts", "brewery", "winery"):
+                    dtype = t
+            ns = argparse.Namespace(
+                year=year, month=None, city=None, state=None, limit=20, type=dtype,
+            )
+            cmd_restaurants(checkins, ns)
+            continue
+
+        # Recent restaurants command
+        if cmd == "recent":
+            year = int(tokens[1]) if len(tokens) > 1 and tokens[1].isdigit() else None
+            dtype = None
+            for j, t in enumerate(tokens[1:], 1):
+                if t.lower() in ("restaurants", "fastfood", "fast-food", "coffee",
+                                  "bars", "bakery", "desserts", "brewery", "winery"):
+                    dtype = t
+            ns = argparse.Namespace(
+                year=year, month=None, city=None, state=None,
+                limit=20, after=None, before=None, type=dtype,
+            )
+            cmd_recent(checkins, ns)
             continue
 
         # Filter-based search: year YYYY, month N, city X, state X, cat X
@@ -486,6 +691,11 @@ examples:
   %(prog)s venues --city "los angeles"     Top LA venues
   %(prog)s timeline                        Monthly checkin chart
   %(prog)s categories --year 2020          Category breakdown for 2020
+  %(prog)s restaurants                     Restaurant cuisine breakdown
+  %(prog)s restaurants --year 2023         Restaurant categories for 2023
+  %(prog)s recent                          Last 20 restaurants visited
+  %(prog)s recent --year 2024 --limit 10   Last 10 restaurants in 2024
+  %(prog)s recent --after 2024-06-01       Restaurants since June 2024
         """,
     )
     parser.add_argument(
@@ -530,6 +740,27 @@ examples:
     p_cats.add_argument("--city", help="Search city (substring)")
     p_cats.add_argument("--state", help="Filter by state code")
 
+    # restaurants
+    type_help = "Filter by dining type: restaurants, fast-food, coffee, bars, bakery, brewery"
+    p_rest = sub.add_parser("restaurants", help="Dining category breakdown")
+    p_rest.add_argument("--year", type=int, help="Filter by year")
+    p_rest.add_argument("--month", type=int, help="Filter by month (1-12)")
+    p_rest.add_argument("--city", help="Search city (substring)")
+    p_rest.add_argument("--state", help="Filter by state code")
+    p_rest.add_argument("--limit", type=int, help="Max top restaurants to show")
+    p_rest.add_argument("--type", help=type_help)
+
+    # recent
+    p_recent = sub.add_parser("recent", help="Recent restaurant visits")
+    p_recent.add_argument("--year", type=int, help="Filter by year")
+    p_recent.add_argument("--month", type=int, help="Filter by month (1-12)")
+    p_recent.add_argument("--city", help="Search city (substring)")
+    p_recent.add_argument("--state", help="Filter by state code")
+    p_recent.add_argument("--limit", type=int, help="Max results to show (default: 20)")
+    p_recent.add_argument("--after", help="Only show checkins after date (YYYY-MM-DD)")
+    p_recent.add_argument("--before", help="Only show checkins before date (YYYY-MM-DD)")
+    p_recent.add_argument("--type", help=type_help)
+
     args = parser.parse_args()
 
     checkins = load_checkins(args.input)
@@ -546,6 +777,10 @@ examples:
         cmd_timeline(checkins, args)
     elif args.command == "categories":
         cmd_categories(checkins, args)
+    elif args.command == "restaurants":
+        cmd_restaurants(checkins, args)
+    elif args.command == "recent":
+        cmd_recent(checkins, args)
 
 
 if __name__ == "__main__":

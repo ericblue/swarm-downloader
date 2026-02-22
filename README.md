@@ -112,6 +112,12 @@ python3 export_csv.py --category restaurant -o data/restaurants.csv
 
 Interactive tool with colored output for searching and analyzing your checkin history.
 
+![Venue Rankings](images/venues.jpg)
+
+![Category Breakdown](images/categories.jpg)
+
+![Category Search](images/category_search.jpg)
+
 #### Interactive Mode
 
 ```bash
@@ -129,6 +135,10 @@ swarm> cat sushi                    # category search
 swarm> stats 2023                   # year stats dashboard
 swarm> venues                       # top venue rankings
 swarm> timeline 2019                # monthly bar chart
+swarm> restaurants 2023             # dining breakdown for a year
+swarm> restaurants restaurants      # sit-down restaurants only
+swarm> recent                       # last 20 dining visits
+swarm> recent restaurants           # last 20 sit-down restaurants
 swarm> help                         # full command reference
 ```
 
@@ -147,6 +157,18 @@ make stats-year Y=2023              # year stats
 make venues                         # top venues
 make timeline                       # monthly timeline
 make categories                     # category breakdown
+
+# Dining (combine Y= year and T= type freely)
+make restaurants                              # all dining breakdown
+make restaurants Y=2023                       # dining for a year
+make restaurants T=restaurants                # sit-down restaurants only
+make restaurants Y=2023 T=restaurants         # sit-down restaurants, 2023
+make recent                                   # last 20 dining visits
+make recent T=restaurants                     # last 20 sit-down restaurants
+make recent T=fast-food                       # last 20 fast food visits
+make recent T=coffee                          # last 20 coffee/café visits
+make recent Y=2024 T=bars                     # bar visits in 2024
+make recent-range A=2024-01-01 B=2024-06-30   # dining in a date range
 ```
 
 Full CLI options:
@@ -156,6 +178,14 @@ python3 search_checkins.py stats --year 2023
 python3 search_checkins.py venues --city "los angeles"
 python3 search_checkins.py timeline --year 2020
 python3 search_checkins.py categories --state CA
+python3 search_checkins.py restaurants --year 2023
+python3 search_checkins.py restaurants --type restaurants           # sit-down only
+python3 search_checkins.py restaurants --type bars --year 2019
+python3 search_checkins.py recent --limit 10
+python3 search_checkins.py recent --type fast-food
+python3 search_checkins.py recent --type coffee --year 2024
+python3 search_checkins.py recent --after 2024-06-01 --before 2024-12-31
+python3 search_checkins.py recent --year 2024 --city irvine
 ```
 
 ## Make Targets
@@ -174,12 +204,34 @@ python3 search_checkins.py categories --state CA
 | `make venues` | Top venues ranking |
 | `make timeline` | Monthly timeline chart |
 | `make categories` | Category breakdown |
+| `make restaurants` | All dining breakdown with type chart |
+| `make restaurants Y=YYYY` | Dining breakdown for a year |
+| `make restaurants T=type` | Filter by dining type (see below) |
+| `make recent` | Last 20 dining visits |
+| `make recent Y=YYYY` | Last dining visits for a year |
+| `make recent T=type` | Recent visits filtered by type |
+| `make recent-range A=DATE B=DATE` | Dining in a date range |
 | `make find Q=query` | Search by venue name |
 | `make find-cat Q=query` | Search by category |
 | `make find-city Q=query` | Search by city |
 | `make find-year Y=YYYY` | List all checkins for a year |
 | `make info` | Show data file stats |
 | `make clean` | Remove downloaded data |
+
+### Dining Types (`T=` / `--type`)
+
+The `restaurants` and `recent` commands use Foursquare's `categoryCode` (13000-13999 = Dining and Drinking) to identify food/drink venues. Use `T=` or `--type` to filter by sub-type:
+
+| Type | `T=` value | What it includes |
+|---|---|---|
+| Restaurants | `restaurants` | Sit-down dining — American, Italian, Sushi, Steakhouse, Gastropub, Pizzeria, etc. |
+| Fast Food | `fast-food` | Fast food chains (McDonald's, Wendy's, In-N-Out, etc.) |
+| Coffee & Cafe | `coffee` | Coffee Shop, Café, Tea Room |
+| Bars & Lounges | `bars` | Bar, Sports Bar, Wine Bar, Pub, Lounge, Cocktail Bar, etc. |
+| Bakery & Desserts | `bakery` | Bakery, Bagel Shop, Donut Shop, Ice Cream, Frozen Yogurt, Dessert Shop |
+| Brewery & Winery | `brewery` | Brewery, Distillery, Winery |
+
+Without `T=`, both commands show all dining/drinking venues combined.
 
 ## Data Formats
 
@@ -323,6 +375,7 @@ swarm-download/
 ├── download_checkins.py    # API downloader (auto-loads .env)
 ├── export_csv.py           # CSV exporter
 ├── search_checkins.py      # Interactive search tool
+├── images/                 # Screenshots for README
 └── data/                   # Downloaded data (not committed)
     ├── all_checkins.json   # Raw API response
     ├── checkins_summary.json

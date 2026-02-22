@@ -1,4 +1,4 @@
-.PHONY: help download export csv search stats venues timeline categories clean env-check
+.PHONY: help download export csv search stats venues timeline categories restaurants recent clean env-check
 
 # Load .env file if it exists
 ifneq (,$(wildcard .env))
@@ -31,6 +31,18 @@ help: ## Show this help
 	@echo "  make venues       Top venues ranking"
 	@echo "  make timeline     Monthly timeline chart"
 	@echo "  make categories   Category breakdown"
+	@echo ""
+	@echo "Dining (combine Y= and T= freely):"
+	@echo "  make restaurants                         All dining breakdown"
+	@echo "  make restaurants Y=2023                  Dining for a year"
+	@echo "  make restaurants T=restaurants            Sit-down restaurants only"
+	@echo "  make restaurants Y=2023 T=restaurants     Sit-down restaurants for a year"
+	@echo "  make recent                              Last 20 dining visits"
+	@echo "  make recent T=restaurants                Last 20 sit-down restaurants"
+	@echo "  make recent Y=2024 T=coffee              Coffee shops in 2024"
+	@echo "  make recent-range A=2024-01-01 B=2024-06-30"
+	@echo ""
+	@echo "  T= types: restaurants, fast-food, coffee, bars, bakery, brewery"
 	@echo ""
 	@echo "Queries (examples):"
 	@echo "  make find Q=starbucks              Search by venue name"
@@ -97,19 +109,31 @@ timeline: $(JSON_FILE) ## Monthly timeline chart
 categories: $(JSON_FILE) ## Category breakdown
 	$(PYTHON) search_checkins.py categories
 
+# ── Dining ───────────────────────────────────────────────────────────────────
+# T= dining type filter: restaurants, fast-food, coffee, bars, bakery, brewery
+
+restaurants: $(JSON_FILE) ## Dining breakdown (usage: make restaurants [Y=2023] [T=restaurants] [L=30])
+	$(PYTHON) search_checkins.py restaurants $(if $(Y),--year $(Y)) $(if $(T),--type $(T)) $(if $(L),--limit $(L))
+
+recent: $(JSON_FILE) ## Recent dining visits (usage: make recent [Y=2024] [T=restaurants] [L=50])
+	$(PYTHON) search_checkins.py recent $(if $(Y),--year $(Y)) $(if $(T),--type $(T)) $(if $(L),--limit $(L))
+
+recent-range: $(JSON_FILE) ## Dining in date range (usage: make recent-range A=2024-01-01 B=2024-06-30 [T=restaurants] [L=100])
+	$(PYTHON) search_checkins.py recent --after $(A) --before $(B) $(if $(T),--type $(T)) $(if $(L),--limit $(L),--limit 50)
+
 # ── Quick queries ────────────────────────────────────────────────────────────
 
-find: $(JSON_FILE) ## Search by venue name (usage: make find Q=starbucks)
-	$(PYTHON) search_checkins.py search --venue "$(Q)" --limit 50
+find: $(JSON_FILE) ## Search by venue name (usage: make find Q=starbucks [L=50])
+	$(PYTHON) search_checkins.py search --venue "$(Q)" $(if $(L),--limit $(L),--limit 50)
 
-find-cat: $(JSON_FILE) ## Search by category (usage: make find-cat Q=sushi)
-	$(PYTHON) search_checkins.py search --category "$(Q)" --limit 50
+find-cat: $(JSON_FILE) ## Search by category (usage: make find-cat Q=sushi [L=50])
+	$(PYTHON) search_checkins.py search --category "$(Q)" $(if $(L),--limit $(L),--limit 50)
 
-find-city: $(JSON_FILE) ## Search by city (usage: make find-city Q="san francisco")
-	$(PYTHON) search_checkins.py search --city "$(Q)" --limit 50
+find-city: $(JSON_FILE) ## Search by city (usage: make find-city Q="san francisco" [L=50])
+	$(PYTHON) search_checkins.py search --city "$(Q)" $(if $(L),--limit $(L),--limit 50)
 
-find-year: $(JSON_FILE) ## All checkins for a year (usage: make find-year Y=2019)
-	$(PYTHON) search_checkins.py search --year $(Y) --limit 100
+find-year: $(JSON_FILE) ## All checkins for a year (usage: make find-year Y=2019 [L=100])
+	$(PYTHON) search_checkins.py search --year $(Y) $(if $(L),--limit $(L),--limit 100)
 
 # ── Info / Maintenance ───────────────────────────────────────────────────────
 
